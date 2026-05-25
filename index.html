@@ -6,30 +6,29 @@
 <title>💌 Our Private Space</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 
-<!-- Firebase -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, push, onValue, serverTimestamp, set, onDisconnect, get }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-  // ─── PASTE YOUR FIREBASE CONFIG HERE ───────────────────────────────────────
+  // ─── YOUR FIREBASE CONFIG (UPDATED) ───────────────────────────────────────
   const firebaseConfig = {
-    apiKey:            "YOUR_API_KEY",
-    authDomain:        "YOUR_PROJECT.firebaseapp.com",
-    databaseURL:       "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId:         "YOUR_PROJECT_ID",
-    storageBucket:     "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId:             "YOUR_APP_ID"
+    apiKey:            "AIzaSyB6nWhsuRJ9j_nMVwYLhy6MB9n2EMG6Cv8",
+    authDomain:        "lovechat-c3e2f.firebaseapp.com",
+    databaseURL:       "https://lovechat-c3e2f-default-rtdb.firebaseio.com",
+    projectId:         "lovechat-c3e2f",
+    storageBucket:     "lovechat-c3e2f.firebasestorage.app",
+    messagingSenderId: "931798539267",
+    appId:             "1:931798539267:web:f3b3695b320c091e4e0236"
   };
   // ───────────────────────────────────────────────────────────────────────────
 
   // ─── SET YOUR SHARED SECRET KEY (both of you must use the same) ────────────
-  const SHARED_SECRET = "OurLoveIsPrivate2024!";  // Change this!
+  const SHARED_SECRET = "OurLoveIsPrivate2024!";  
   // ───────────────────────────────────────────────────────────────────────────
 
   // ─── ROOM PASSWORD (only people with this can enter) ───────────────────────
-  const ROOM_PASSWORD = "iloveyou";   // Change this!
+  const ROOM_PASSWORD = "iloveyou";   
   // ───────────────────────────────────────────────────────────────────────────
 
   // ─── YOUR NAMES ─────────────────────────────────────────────────────────────
@@ -568,7 +567,6 @@ body::after {
 
 <div id="app">
 
-  <!-- Header -->
   <div class="header">
     <div class="avatar-ring">💕</div>
     <div class="header-info">
@@ -583,22 +581,16 @@ body::after {
     </div>
   </div>
 
-  <!-- E2E notice -->
   <div class="e2e-strip">🔒 End-to-end encrypted · Only you two can read this</div>
 
-  <!-- My name badge -->
   <div class="my-badge">You are logged in as <strong id="my-name-badge"></strong></div>
 
-  <!-- Messages -->
   <div id="msg-box">
     <div class="empty-state">Say hello 👋</div>
   </div>
 
-  <!-- Input area -->
   <div class="input-area">
-    <!-- Emoji picker -->
     <div id="emoji-picker">
-      <!-- Love & hearts -->
       <button class="e-btn" onclick="insertEmoji('❤️')">❤️</button>
       <button class="e-btn" onclick="insertEmoji('🥰')">🥰</button>
       <button class="e-btn" onclick="insertEmoji('😍')">😍</button>
@@ -607,7 +599,6 @@ body::after {
       <button class="e-btn" onclick="insertEmoji('💗')">💗</button>
       <button class="e-btn" onclick="insertEmoji('💘')">💘</button>
       <button class="e-btn" onclick="insertEmoji('💝')">💝</button>
-      <!-- Faces -->
       <button class="e-btn" onclick="insertEmoji('😘')">😘</button>
       <button class="e-btn" onclick="insertEmoji('😊')">😊</button>
       <button class="e-btn" onclick="insertEmoji('🥺')">🥺</button>
@@ -616,7 +607,6 @@ body::after {
       <button class="e-btn" onclick="insertEmoji('🤩')">🤩</button>
       <button class="e-btn" onclick="insertEmoji('😏')">😏</button>
       <button class="e-btn" onclick="insertEmoji('🤗')">🤗</button>
-      <!-- Fun -->
       <button class="e-btn" onclick="insertEmoji('🌹')">🌹</button>
       <button class="e-btn" onclick="insertEmoji('✨')">✨</button>
       <button class="e-btn" onclick="insertEmoji('🌙')">🌙</button>
@@ -625,7 +615,6 @@ body::after {
       <button class="e-btn" onclick="insertEmoji('🦋')">🦋</button>
       <button class="e-btn" onclick="insertEmoji('🫂')">🫂</button>
       <button class="e-btn" onclick="insertEmoji('💋')">💋</button>
-      <!-- More -->
       <button class="e-btn" onclick="insertEmoji('👑')">👑</button>
       <button class="e-btn" onclick="insertEmoji('🍓')">🍓</button>
       <button class="e-btn" onclick="insertEmoji('🧸')">🧸</button>
@@ -646,7 +635,6 @@ body::after {
 
 </div>
 
-<!-- VC Modal -->
 <div id="vc-modal">
   <iframe id="vc-frame" allow="camera; microphone; fullscreen; display-capture"></iframe>
   <button class="close-vc" onclick="closeVC()">✕ End Call</button>
