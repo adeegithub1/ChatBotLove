@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>💌 Our Private Space</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, push, onValue, serverTimestamp, set, onDisconnect, get }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // ─── PASTE YOUR FIREBASE CONFIG HERE ───────────────────────────────────────
+  const firebaseConfig = {
+    apiKey:            "YOUR_API_KEY",
+    authDomain:        "YOUR_PROJECT.firebaseapp.com",
+    databaseURL:       "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+    projectId:         "YOUR_PROJECT_ID",
+    storageBucket:     "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId:             "YOUR_APP_ID"
+  };
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // ─── SET YOUR SHARED SECRET KEY (both of you must use the same) ────────────
+  const SHARED_SECRET = "OurLoveIsPrivate2024!";  // Change this!
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // ─── ROOM PASSWORD (only people with this can enter) ───────────────────────
+  const ROOM_PASSWORD = "iloveyou";   // Change this!
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // ─── YOUR NAMES ─────────────────────────────────────────────────────────────
+  const NAMES = ["You 💙", "Her 💗"];   // first person to log in gets name[0]
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /* ═══════════════════════════ CRYPTO HELPERS ══════════════════════════════ */
+  async function deriveKey(secret) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]
+    );
+    return crypto.subtle.deriveKey(
+      { name:"PBKDF2", salt: enc.encode("lovesalt"), iterations:100000, hash:"SHA-256" },
+      keyMaterial, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"]
+    );
+  }
+
+  async function encrypt(text, key) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder();
+    const ct  = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, enc.encode(text));
+    const buf = new Uint8Array(iv.byteLength + ct.byteLength);
+    buf.set(iv, 0); buf.set(new Uint8Array(ct), iv.byteLength);
+    return btoa(String.fromCharCode(...buf));
+  }
+
+  async function decrypt(b64, key) {
+    try {
+      const buf  = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      const iv   = buf.slice(0, 12);
+      const ct   = buf.slice(12);
+      const pt   = await crypto.subtle.decrypt({ name:"AES-GCM", iv }, key, ct);
+      return new TextDecoder().decode(pt);
+    } catch { return "🔒 [encrypted]"; }
+  }
+
+  /* ═══════════════════════════ APP BOOT ════════════════════════════════════ */
+  window.APP_READY = false;
+  let db, cryptoKey, myName, presenceRef;
+
+  async function boot() {
+    // Check password
+    const savedPass = sessionStorage.getItem("lc_pass");
+    if (savedPass !== ROOM_PASSWORD) {
+      const entered = prompt("🔐 Enter room password:");
+      if (entered !== ROOM_PASSWORD) {
+        document.getElementById("lock-screen").style.display = "flex";
+        document.getElementById("app").style.display = "none";
+        return;
+      }
+      sessionStorage.setItem("lc_pass", entered);
+    }
+
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+    cryptoKey = await deriveKey(SHARED_SECRET);
+
+    // Assign name based on who's online
+    const presSnap = await get(ref(db, "presence"));
+    const online = presSnap.exists() ? Object.keys(presSnap.val()).length : 0;
+    myName = online === 0 ? NAMES[0] : NAMES[1];
+
+    // Presence
+    presenceRef = ref(db, `presence/${myName.replace(/[^a-z]/gi,"")}`);
+    await set(presenceRef, { name: myName, online: true, ts: Date.now() });
+    onDisconnect(presenceRef).remove();
+
+    // Online indicator
+    onValue(ref(db, "presence"), snap => {
+      const count = snap.exists() ? Object.keys(snap.val()).length : 0;
+      document.getElementById("online-dot").style.background =
+        count >= 2 ? "#4ade80" : "#facc15";
+      document.getElementById("online-txt").textContent =
+        count >= 2 ? "Both online ✨" : "Waiting for her…";
+    });
+
+    // Load messages
+    onValue(ref(db, "messages"), async snap => {
+      const box = document.getElementById("msg-box");
+      if (!snap.exists()) { box.innerHTML = `<div class="empty-state">Say hello 👋</div>`; return; }
+      const msgs = snap.val();
+      const keys = Object.keys(msgs);
+      const rendered = await Promise.all(keys.map(async k => {
+        const m = msgs[k];
+        const text = await decrypt(m.text, cryptoKey);
+        const mine = m.sender === myName;
+        const time = m.ts ? new Date(m.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "";
+        return `<div class="msg-wrap ${mine?"me":"her"}">
+          <div class="bubble ${mine?"bubble-me":"bubble-her"}">
+            <span class="msg-text">${escapeHtml(text)}</span>
+            <span class="msg-meta">${time} ${mine?"✓✓":""}</span>
+          </div>
+        </div>`;
+      }));
+      box.innerHTML = rendered.join("");
+      box.scrollTop = box.scrollHeight;
+    });
+
+    document.getElementById("app").style.display = "flex";
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("my-name-badge").textContent = myName;
+
+    // Send on enter
+    document.getElementById("msg-input").addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+    });
+
+    window.APP_READY = true;
+  }
+
+  function escapeHtml(t) {
+    return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  async function sendMsg() {
+    const input = document.getElementById("msg-input");
+    const text  = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    closeEmoji();
+    const encrypted = await encrypt(text, cryptoKey);
+    await push(ref(db, "messages"), {
+      text: encrypted,
+      sender: myName,
+      ts: Date.now()
+    });
+  }
+
+  function openVC() {
+    const room = encodeURIComponent("ourchatroom-" + ROOM_PASSWORD.replace(/[^a-z0-9]/gi,""));
+    const url  = `https://meet.jit.si/${room}`;
+    const modal = document.getElementById("vc-modal");
+    document.getElementById("vc-frame").src = url;
+    modal.style.display = "flex";
+  }
+
+  function closeVC() {
+    document.getElementById("vc-modal").style.display = "none";
+    document.getElementById("vc-frame").src = "";
+  }
+
+  function closeEmoji() {
+    document.getElementById("emoji-picker").style.display = "none";
+  }
+
+  function toggleEmoji() {
+    const p = document.getElementById("emoji-picker");
+    p.style.display = p.style.display === "grid" ? "none" : "grid";
+  }
+
+  function insertEmoji(e) {
+    const input = document.getElementById("msg-input");
+    input.value += e;
+    input.focus();
+  }
+
+  // Expose to global
+  window.sendMsg    = sendMsg;
+  window.openVC     = openVC;
+  window.closeVC    = closeVC;
+  window.toggleEmoji= toggleEmoji;
+  window.insertEmoji= insertEmoji;
+
+  boot();
+</script>
+
+<style>
+:root {
+  --bg:       #0d0d0f;
+  --surface:  #161619;
+  --panel:    #1e1e23;
+  --border:   rgba(255,255,255,0.07);
+  --accent:   #e879a0;
+  --accent2:  #7c6af7;
+  --me-bg:    linear-gradient(135deg,#e879a0,#c44d86);
+  --her-bg:   #252530;
+  --text:     #f0eaf5;
+  --muted:    rgba(240,234,245,0.45);
+  --radius:   18px;
+  --font:     'DM Sans', sans-serif;
+  --font-d:   'DM Serif Display', serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Noise overlay ── */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Ambient glow ── */
+body::after {
+  content: "";
+  position: fixed;
+  width: 600px; height: 600px;
+  top: -200px; right: -200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(232,121,160,0.12) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#loading {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  z-index: 100;
+  font-family: var(--font-d);
+  font-size: 1.4rem;
+  color: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+#lock-screen {
+  display: none;
+  position: fixed; inset: 0;
+  background: var(--bg);
+  align-items: center; justify-content: center;
+  z-index: 200;
+  flex-direction: column;
+  gap: 1rem;
+  font-family: var(--font-d);
+  font-size: 1.6rem;
+  color: var(--muted);
+}
+
+/* ── App shell ── */
+#app {
+  display: none;
+  flex-direction: column;
+  width: min(420px, 100vw);
+  height: 100dvh;
+  background: var(--surface);
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 80px rgba(0,0,0,0.6);
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 10;
+}
+
+.avatar-ring {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px rgba(232,121,160,0.3);
+}
+
+.header-info { flex: 1; min-width: 0; }
+
+.header-title {
+  font-family: var(--font-d);
+  font-style: italic;
+  font-size: 1.1rem;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.header-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+#online-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #facc15;
+  transition: background 0.4s;
+  flex-shrink: 0;
+}
+
+.header-actions { display: flex; gap: 8px; }
+
+.icon-btn {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+}
+.icon-btn:hover {
+  background: rgba(232,121,160,0.15);
+  border-color: var(--accent);
+  transform: scale(1.05);
+}
+
+/* ── My badge ── */
+.my-badge {
+  text-align: center;
+  padding: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: rgba(124,106,247,0.08);
+  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.05em;
+}
+
+/* ── Message box ── */
+#msg-box {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scroll-behavior: smooth;
+}
+
+#msg-box::-webkit-scrollbar { width: 4px; }
+#msg-box::-webkit-scrollbar-track { background: transparent; }
+#msg-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+.empty-state {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  font-family: var(--font-d);
+  font-style: italic;
+  font-size: 1.1rem;
+}
+
+.msg-wrap {
+  display: flex;
+  margin-bottom: 2px;
+  animation: msgIn 0.25s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+.msg-wrap.me  { justify-content: flex-end; }
+.msg-wrap.her { justify-content: flex-start; }
+
+.bubble {
+  max-width: 78%;
+  padding: 9px 14px 7px;
+  border-radius: 18px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  word-break: break-word;
+  position: relative;
+}
+.bubble-me {
+  background: var(--me-bg);
+  border-bottom-right-radius: 4px;
+  color: #fff;
+}
+.bubble-her {
+  background: var(--her-bg);
+  border-bottom-left-radius: 4px;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.msg-meta {
+  display: block;
+  font-size: 0.65rem;
+  margin-top: 3px;
+  opacity: 0.6;
+  text-align: right;
+}
+
+/* ── Emoji picker ── */
+.input-area {
+  padding: 10px 14px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+#emoji-picker {
+  display: none;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 14px; right: 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 20;
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.4);
+  animation: slideUp 0.2s ease;
+}
+@keyframes slideUp {
+  from { opacity:0; transform:translateY(10px); }
+  to   { opacity:1; transform:none; }
+}
+
+.e-btn {
+  font-size: 1.3rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 4px;
+  transition: transform 0.15s, background 0.15s;
+  line-height: 1;
+}
+.e-btn:hover { transform: scale(1.3); background: rgba(255,255,255,0.07); }
+
+/* ── Input row ── */
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#msg-input {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 10px 16px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.9rem;
+  resize: none;
+  max-height: 100px;
+  outline: none;
+  transition: border-color 0.2s;
+  line-height: 1.4;
+}
+#msg-input:focus { border-color: rgba(232,121,160,0.5); }
+#msg-input::placeholder { color: var(--muted); }
+
+.send-btn {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: var(--me-bg);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 15px rgba(232,121,160,0.4);
+}
+.send-btn:hover { transform: scale(1.08); box-shadow: 0 6px 20px rgba(232,121,160,0.6); }
+.send-btn:active { transform: scale(0.95); }
+
+/* ── VC Modal ── */
+#vc-modal {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 50;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  backdrop-filter: blur(8px);
+}
+
+#vc-frame {
+  width: min(480px, 96vw);
+  height: min(560px, 80dvh);
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.close-vc {
+  background: var(--me-bg);
+  border: none;
+  color: #fff;
+  padding: 10px 28px;
+  border-radius: 30px;
+  font-family: var(--font);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.close-vc:hover { opacity: 0.85; }
+
+/* ── E2E badge ── */
+.e2e-strip {
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px;
+  padding: 5px;
+  font-size: 0.68rem;
+  color: rgba(74,222,128,0.7);
+  background: rgba(74,222,128,0.05);
+  border-bottom: 1px solid rgba(74,222,128,0.1);
+  letter-spacing: 0.04em;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">💌 Opening your space…</div>
+
+<div id="lock-screen">
+  <div>🔒</div>
+  <div style="font-size:1rem;color:var(--muted)">Wrong password. Refresh to try again.</div>
+</div>
+
+<div id="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="avatar-ring">💕</div>
+    <div class="header-info">
+      <div class="header-title">Our Private Space</div>
+      <div class="header-status">
+        <div id="online-dot"></div>
+        <span id="online-txt">Connecting…</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="icon-btn" onclick="openVC()" title="Start call">📞</button>
+    </div>
+  </div>
+
+  <!-- E2E notice -->
+  <div class="e2e-strip">🔒 End-to-end encrypted · Only you two can read this</div>
+
+  <!-- My name badge -->
+  <div class="my-badge">You are logged in as <strong id="my-name-badge"></strong></div>
+
+  <!-- Messages -->
+  <div id="msg-box">
+    <div class="empty-state">Say hello 👋</div>
+  </div>
+
+  <!-- Input area -->
+  <div class="input-area">
+    <!-- Emoji picker -->
+    <div id="emoji-picker">
+      <!-- Love & hearts -->
+      <button class="e-btn" onclick="insertEmoji('❤️')">❤️</button>
+      <button class="e-btn" onclick="insertEmoji('🥰')">🥰</button>
+      <button class="e-btn" onclick="insertEmoji('😍')">😍</button>
+      <button class="e-btn" onclick="insertEmoji('💕')">💕</button>
+      <button class="e-btn" onclick="insertEmoji('💖')">💖</button>
+      <button class="e-btn" onclick="insertEmoji('💗')">💗</button>
+      <button class="e-btn" onclick="insertEmoji('💘')">💘</button>
+      <button class="e-btn" onclick="insertEmoji('💝')">💝</button>
+      <!-- Faces -->
+      <button class="e-btn" onclick="insertEmoji('😘')">😘</button>
+      <button class="e-btn" onclick="insertEmoji('😊')">😊</button>
+      <button class="e-btn" onclick="insertEmoji('🥺')">🥺</button>
+      <button class="e-btn" onclick="insertEmoji('😂')">😂</button>
+      <button class="e-btn" onclick="insertEmoji('😭')">😭</button>
+      <button class="e-btn" onclick="insertEmoji('🤩')">🤩</button>
+      <button class="e-btn" onclick="insertEmoji('😏')">😏</button>
+      <button class="e-btn" onclick="insertEmoji('🤗')">🤗</button>
+      <!-- Fun -->
+      <button class="e-btn" onclick="insertEmoji('🌹')">🌹</button>
+      <button class="e-btn" onclick="insertEmoji('✨')">✨</button>
+      <button class="e-btn" onclick="insertEmoji('🌙')">🌙</button>
+      <button class="e-btn" onclick="insertEmoji('⭐')">⭐</button>
+      <button class="e-btn" onclick="insertEmoji('🎵')">🎵</button>
+      <button class="e-btn" onclick="insertEmoji('🦋')">🦋</button>
+      <button class="e-btn" onclick="insertEmoji('🫂')">🫂</button>
+      <button class="e-btn" onclick="insertEmoji('💋')">💋</button>
+      <!-- More -->
+      <button class="e-btn" onclick="insertEmoji('👑')">👑</button>
+      <button class="e-btn" onclick="insertEmoji('🍓')">🍓</button>
+      <button class="e-btn" onclick="insertEmoji('🧸')">🧸</button>
+      <button class="e-btn" onclick="insertEmoji('🎁')">🎁</button>
+      <button class="e-btn" onclick="insertEmoji('🪐')">🪐</button>
+      <button class="e-btn" onclick="insertEmoji('🌈')">🌈</button>
+      <button class="e-btn" onclick="insertEmoji('🍦')">🍦</button>
+      <button class="e-btn" onclick="insertEmoji('☕')">☕</button>
+    </div>
+
+    <div class="input-row">
+      <button class="icon-btn" onclick="toggleEmoji()" style="flex-shrink:0">😊</button>
+      <textarea id="msg-input" placeholder="Message…" rows="1"
+        oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+      <button class="send-btn" onclick="sendMsg()">➤</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- VC Modal -->
+<div id="vc-modal">
+  <iframe id="vc-frame" allow="camera; microphone; fullscreen; display-capture"></iframe>
+  <button class="close-vc" onclick="closeVC()">✕ End Call</button>
+</div>
+
+</body>
+</html>
